@@ -1,3 +1,7 @@
-/.env
-/__pycache__
-/venv
+# Ignore the actual secrets
+.env
+.venv
+__pycache__/
+
+# Ignore Mac system files
+.DS_Store
