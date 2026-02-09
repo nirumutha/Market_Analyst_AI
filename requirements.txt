@@ -1,8 +1,9 @@
 streamlit
+langchain
 langchain-openai
 langchain-community
 openai
 python-dotenv
 apify-client
-requests
 google-search-results
+tiktoken
