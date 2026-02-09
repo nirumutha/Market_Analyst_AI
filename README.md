@@ -49,4 +49,6 @@ Most tools stop at Gross Margin. Market Analyst AI calculates the **Net Profit**
 1. **Clone the Repository**
    ```bash
    git clone [https://github.com/nirumutha/Market_Analyst_AI.git](https://github.com/nirumutha/Market_Analyst_AI.git)
-   cd Market_Analyst_AI
+   ### 2. Install Dependencies
+```bash
+pip install -r requirements.txt
