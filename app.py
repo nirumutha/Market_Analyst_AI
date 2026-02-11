@@ -6,7 +6,7 @@ st.set_page_config(page_title="AI Market Analyst", page_icon="⚡", layout="wide
 
 try:
     from config import get_country_config
-    from agents import analyze_market_trends
+    from agents import analyze_market_trends, lookup_tax_rate
     from scraper import get_price_data
     from sourcing_agent import get_wholesale_cost
     from brain import calculate_viability_score
@@ -94,9 +94,13 @@ try:
             with col3:
                 st.write("🏭 Agent 3: Supply Chain...")
                 sourcing_data = get_wholesale_cost(product_name, config)
+            
+            st.write("⚖️ Agent 4: Tax & Compliance Scan...")
+            tax_info = lookup_tax_rate(product_name, config)
+            st.caption(f"Detected Tax Slab: {int(tax_info.get('rate', 0.18)*100)}% ({tax_info.get('reason', 'Standard')})")
                 
-            st.write("🧠 Agent 4: Synthesizing Strategy...")
-            verdict = calculate_viability_score(product_name, config, market_data, competitor_data, sourcing_data)
+            st.write("🧠 Agent 5: Synthesizing Strategy...")
+            verdict = calculate_viability_score(product_name, config, market_data, competitor_data, sourcing_data, tax_info)
             status.update(label="Deep Analysis Complete", state="complete", expanded=False)
 
         # PHASE 2: DASHBOARD
@@ -124,16 +128,16 @@ try:
             vol_color = "orange" if vol == "Medium" else "red" if vol == "High" else "green"
             st.caption(f"Market Volatility: :{vol_color}[{vol}]")
 
-        # 2. STRATEGIC THESIS (NEW ELITE FEATURE)
+        # 2. STRATEGIC THESIS
         st.markdown(f"""
         <div class="thesis-box">
             🧠 <b>Strategic Thesis:</b> {verdict.get('strategic_thesis', 'Analysis pending...')}
         </div>
         """, unsafe_allow_html=True)
 
-        # 3. FINANCIALS (WATERFALL)
+        # 3. FINANCIALS (SAFE MODE)
         st.markdown("---")
-        st.subheader("💰 Unit Economics (Waterfall)")
+        st.subheader("💰 Profitability Analysis (Estimates)")
         
         fin = verdict.get('financials', {})
         currency = config['currency_symbol']
@@ -141,33 +145,56 @@ try:
         f_col1, f_col2 = st.columns([1, 1])
         
         with f_col1:
+            sell_price = fin.get('sell_price', 0)
+            cogs = fin.get('cogs', 0)
+            gross_profit = sell_price - cogs
+            net_profit = fin.get('net_profit', 0)
+            
+            # SAFE MODE: Round numbers to avoid "fake precision"
+            def safe_num(n): return f"{int(n):,}"
+            
             st.markdown(f"""
             <div style="background:#f9f9f9; padding:15px; border-radius:10px; border:1px solid #ddd;">
-                <div class="finance-item"><span class="finance-label">Target Sell Price</span><span class="finance-value">{currency}{fin.get('sell_price')}</span></div>
-                <div class="finance-item"><span class="finance-label" style="color:#d9534f;">- COGS (Manufacturing)</span><span class="finance-value" style="color:#d9534f;">{currency}{fin.get('cogs')}</span></div>
-                <div class="finance-item" style="border-top:1px solid #ccc; background:#fff;"><span class="finance-label"><b>= Gross Profit</b></span><span class="finance-value">{currency}{fin.get('sell_price') - fin.get('cogs')}</span></div>
-                <div class="finance-item"><span class="finance-label" style="color:#f0ad4e;">- Marketing (CPA)</span><span class="finance-value" style="color:#f0ad4e;">{currency}{fin.get('marketing_cpa')}</span></div>
-                <div class="finance-item"><span class="finance-label" style="color:#f0ad4e;">- Logistics/Returns</span><span class="finance-value" style="color:#f0ad4e;">{currency}{fin.get('logistics_cost')}</span></div>
-                <div class="finance-item"><span class="finance-label" style="color:#f0ad4e;">- Tax/VAT</span><span class="finance-value" style="color:#f0ad4e;">{currency}{fin.get('tax_rate')}</span></div>
-                <div class="finance-total"><span style="color:#28a745;">= NET PROFIT (Contribution)</span><span style="color:#28a745;">{currency}{fin.get('net_profit')}</span></div>
+                <div class="finance-item"><span class="finance-label">Avg Market Price</span><span class="finance-value">{currency}{safe_num(sell_price)}</span></div>
+                <div class="finance-item"><span class="finance-label" style="color:#d9534f;">- Est. Manufacturing (COGS)</span><span class="finance-value" style="color:#d9534f;">{currency}{safe_num(cogs)}</span></div>
+                <div class="finance-item" style="border-top:1px solid #ccc; background:#fff;"><span class="finance-label"><b>= Gross Profit</b></span><span class="finance-value">{currency}{safe_num(gross_profit)}</span></div>
+                <div class="finance-item"><span class="finance-label" style="color:#f0ad4e;">- Marketing & Ops Costs</span><span class="finance-value" style="color:#f0ad4e;">{currency}{safe_num(fin.get('marketing_cpa') + fin.get('logistics_cost'))}</span></div>
+                <div class="finance-item"><span class="finance-label" style="color:#f0ad4e;">- Est. Tax/VAT</span><span class="finance-value" style="color:#f0ad4e;">{currency}{safe_num(fin.get('tax_rate'))}</span></div>
+                <div class="finance-total"><span style="color:#28a745;">= NET PROFIT ESTIMATE</span><span style="color:#28a745;">~ {currency}{safe_num(net_profit)}</span></div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.caption("*Based on category benchmarks. Actual costs may vary.*")
+            
+        with f_col2:
+            st.write("#### 📊 Margin Health")
+            
+            # Qualitative Health Check instead of just raw numbers
+            net_m = fin.get('net_margin_pct', 0)
+            
+            # Determine color and text
+            if net_m > 25: 
+                health_color = "#28a745" # Green
+                health_text = "Healthy"
+            elif net_m > 10: 
+                health_color = "#ffc107" # Orange
+                health_text = "Tight"
+            else:
+                health_color = "#dc3545" # Red
+                health_text = "Critical"
+            
+            # FORCE HTML RENDERING (This fixes the ": red[...]" bug)
+            st.markdown(f"""
+            <div style="font-size: 16px; margin-bottom: 10px;">
+                Projected Net Margin: <span style="color: {health_color}; font-weight: bold;">{health_text} (~{net_m}%)</span>
             </div>
             """, unsafe_allow_html=True)
             
-        with f_col2:
-            st.write("#### 📊 Margin Analysis")
-            st.write(f"**Lifecycle Stage:** {verdict.get('lifecycle_stage')}")
             if "note" in fin: st.info(f"ℹ️ **Analyst Note:** {fin['note']}")
             
-            # Progress Bar for Net Margin
-            net_profit = fin.get('net_profit', 0)
-            sell_price = fin.get('sell_price', 1)
-            net_m = int((net_profit / sell_price) * 100) if sell_price > 0 else 0
-            
-            st.write(f"**Net Margin Health: {net_m}%**")
             if net_m > 0:
                 st.progress(min(net_m / 40, 1.0)) 
             else:
-                st.error("⚠️ Negative Net Margin projected.")
+                st.error("⚠️ Negative Net Margin projected. High Risk.")
 
         # 4. STRATEGY
         st.markdown("---")

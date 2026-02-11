@@ -6,23 +6,17 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Temperature 0.5 allows for dynamic, product-specific creativity
+# Temperature 0.5 for creativity in strategy, but we force math logic below
 llm = ChatOpenAI(model="gpt-4o", temperature=0.5)
-
-def smart_round(value):
-    try:
-        val = float(value)
-        if val > 1000: return int(round(val / 100) * 100)
-        elif val > 100: return int(round(val / 10) * 10)
-        return int(val)
-    except: return value
 
 def clean_and_parse_json(text):
     try:
+        # Try to find JSON inside the text (handling potential markdown wrappers)
         cleaned = text.replace("```json", "").replace("```", "").strip()
         return json.loads(cleaned)
     except:
         try:
+            # Regex fallback if the AI adds extra text around the JSON
             match = re.search(r"(\{.*\})", text, re.DOTALL)
             if match: return json.loads(match.group(1))
         except: return None
@@ -35,136 +29,138 @@ def get_empty_verdict(error_msg):
         "breakdown": {}, "market_entry": {}, "pros": [], "cons": [], "recommendation": error_msg
     }
 
-def get_regional_context(country_code):
-    if country_code == "uk":
-        return "MARKET CONTEXT: UK (High VAT, Expensive Ads, Mature Tech Adoption)"
-    elif country_code == "in":
-        return "MARKET CONTEXT: INDIA (Price Sensitive, High Volume Needed, Emerging Tech)"
-    return "MARKET CONTEXT: Global Standard"
-
-def calculate_viability_score(product_name, country_config, market_data, competitor_data, sourcing_data):
+def calculate_viability_score(product_name, country_config, market_data, competitor_data, sourcing_data, tax_info):
     currency = country_config['currency_symbol']
     scraped_price = competitor_data.get('average_price', 0)
     is_fallback = "Fallback" in competitor_data.get('source', '')
     confidence_score = 55 if is_fallback else 70
-    regional_context = get_regional_context(country_config.get('google_gl', ''))
+    
+    # --- 1. STRICT FINANCIAL CALCULATOR (Python, not AI) ---
+    # We calculate everything here to ensure 100% mathematical accuracy.
+    
+    if scraped_price > 0:
+        # Step A: Clean the Price (Force Integer)
+        sell_price = int(scraped_price)
+        
+        # Step B: Get Tax Rate (Handle 18 vs 0.18)
+        raw_rate = tax_info.get('rate', 0.18)
+        if raw_rate > 1: raw_rate = raw_rate / 100 # Fix for "18" becoming "0.18"
+        
+        # Step C: Calculate Costs as Integers (No decimals)
+        cogs_cost = int(sell_price * 0.35)   # 35% Manufacturing
+        ads_cost = int(sell_price * 0.25)    # 25% Marketing/CPA
+        logs_cost = int(sell_price * 0.15)   # 15% Logistics
+        tax_amt = int(sell_price * raw_rate) # Tax Amount (Correctly calculated now)
+        
+        # Step D: Calculate Exact Net Profit
+        total_expenses = cogs_cost + ads_cost + logs_cost + tax_amt
+        net_profit = sell_price - total_expenses
+        
+        # Step E: Calculate Margin %
+        net_margin = int((net_profit / sell_price) * 100)
+    else:
+        # Safety for zero results
+        sell_price = cogs_cost = ads_cost = logs_cost = tax_amt = net_profit = net_margin = 0
+
+    # --- END CALCULATOR ---
 
     template = """
     You are a Strategic Market Intelligence Engine.
     
     TARGET PRODUCT: "{product_name}"
     TARGET MARKET: {country_full}
-    {regional_context}
     
-    REAL DATA STREAMS:
-    - Detected Price: {currency}{scraped_price} (Source: {comp_source})
-    - Search Trends: {trends}
+    HARD DATA (DO NOT CHANGE THESE NUMBERS):
+    - Avg Sell Price: {currency}{price}
+    - Tax ({tax_pct}%): {currency}{tax_amt}
+    - REAL NET PROFIT: {currency}{net_profit} (Margin: {net_margin}%)
+    - Competitor Count: {comp_count} items found
+    
+    CONTEXT:
+    - Trends: {trends}
     - Supply Chain: {sourcing}
     
-    ### MISSION: 
-    Generate a highly specific strategic analysis for "{product_name}".
+    SCORING RUBRIC (BE STRICT):
+    - DEMAND (1-10): 10 = Viral/Explosive trend. 5 = Stable/Flat. 1 = Dead/Declining.
+    - COMPETITION (1-10): 10 = Blue Ocean (Zero rivals). 5 = Normal. 1 = Saturated/Bloodbath (>20 rivals).
+    - ECONOMICS (1-10): 10 = High Margin (>25%). 5 = Tight Margin (10-15%). 1 = Money Pit (<5%).
     
-    ### DYNAMIC LOGIC RULES (MUST FOLLOW):
-    1. **Category Detection:** First, determine if this is Electronics, Fashion, Home, or Consumable.
-    2. **Economics:** - If Electronics: Gross Margin is typically 30-40%.
-       - If Fashion/Beauty: Gross Margin is typically 65-80%.
-       - If Home/Generic: Gross Margin is typically 50%.
-       - *DO NOT output generic "82%" for everything.*
-    3. **Competition:**
-       - Use specific comparisons. If "{product_name}" is a "Gaming Laptop", compare listings to "Office Laptops".
-       - If "{product_name}" is "Lipstick", compare to "Skincare".
+    MISSION:
+    1. Analyze the data using the rubric above.
+    2. Write a 'Strategic Thesis'. 
+    3. CRITICAL RULE: If you mention price, write "{currency}{price}" (No decimals).
     
-    ### OUTPUT JSON FORMAT:
+    OUTPUT JSON FORMAT:
     {{
-        "final_score": 7.5,
+        "final_score": <Calculate weighted average>,
         "confidence_score": {confidence_score},
         "verdict_tag": "🟡 ENTER CAUTIOUSLY",
-        "strategic_thesis": "Two sentence executive summary specific to {product_name} and its category challenges.",
+        "strategic_thesis": "Thesis here.",
         "lifecycle_stage": "Growth",
         "volatility": "Medium",
         "financials": {{ 
-            "sell_price": {scraped_price}, 
-            "cogs": 0, 
-            "gross_margin_pct": 0,
-            "marketing_cpa": 0,
-            "logistics_cost": 0,
-            "tax_rate": 0,
-            "net_margin_pct": 0,
-            "net_profit": 0,
-            "note": "Financial note specific to {product_name} economics."
+            "sell_price": {price}, 
+            "cogs": {cogs}, 
+            "marketing_cpa": {ads},
+            "logistics_cost": {logs},
+            "tax_rate": {tax_amt},
+            "net_margin_pct": {net_margin},
+            "net_profit": {net_profit},
+            "note": "Net profit is {currency}{net_profit}."
         }},
-        "market_entry": {{ "strategy": "D2C/Retail", "reason": "Reason based on product category." }},
+        "market_entry": {{ "strategy": "D2C/Retail", "reason": "Reason." }},
         "breakdown": {{
-            "demand": {{ 
-                "total": 8, 
-                "signal_1": "Interest: [Rising/Falling] (from Trends)", 
-                "signal_2": "Vol: [Estimate]k/mo", 
-                "signal_3": "Adoption: [Early/Mass]", 
-                "reason": "Demand analysis for {product_name}." 
-            }},
-            "competition": {{ 
-                "total": 6, 
-                "signal_1": "Saturation: [High/Low]", 
-                "signal_2": "Rivals: [Fragmented/Monopoly]", 
-                "signal_3": "Differentiation: [Easy/Hard]", 
-                "reason": "Competition analysis for {product_name}." 
-            }},
-            "economics": {{ 
-                "total": 7, 
-                "signal_1": "Gross: [Category Benchmark]%", 
-                "signal_2": "Net: [Estimate]%", 
-                "signal_3": "Ads: [Cheap/Expensive]", 
-                "reason": "Economic analysis for {product_name}." 
-            }},
-            "culture": {{ 
-                "total": 6, 
-                "signal_1": "Fit: [Natural/Forced]", 
-                "signal_2": "Trust: [Required/Not Needed]", 
-                "signal_3": "Barrier: [None/High]", 
-                "reason": "Cultural analysis for {product_name}." 
-            }}
+            "demand": {{ "total": <Score>, "reason": "Reason.", "signal_1": "Search: High", "signal_2": "Growth: Fast", "signal_3": "Social: Viral" }},
+            "competition": {{ "total": <Score>, "reason": "Reason.", "signal_1": "Count: High", "signal_2": "Dominance: Low", "signal_3": "Barrier: Med" }},
+            "economics": {{ "total": <Score>, "reason": "Reason.", "signal_1": "Gross: Good", "signal_2": "Net: Tight", "signal_3": "Ads: High" }},
+            "culture": {{ "total": <Score>, "reason": "Reason.", "signal_1": "Tech: High", "signal_2": "Trust: Low", "signal_3": "Habit: New" }}
         }},
-        "pros": [
-            {{ "title": "Product Strength", "specs": ["Specific Point 1 about {product_name}", "Specific Point 2"] }},
-            {{ "title": "Market Opportunity", "specs": ["Specific Point 1", "Specific Point 2"] }}
-        ],
-        "cons": [
-            {{ "title": "Category Risk", "specs": ["Specific Point 1 about {product_name}", "Specific Point 2"] }},
-            {{ "title": "Operational Pain", "specs": ["Specific Point 1", "Specific Point 2"] }}
-        ],
-        "recommendation": "Final strategic advice."
+        "pros": [ "Pro 1", "Pro 2" ],
+        "cons": [ "Con 1", "Con 2" ],
+        "recommendation": "Final advice."
     }}
     """
     
+    comp_count = len(competitor_data.get('products', [])) if competitor_data else 0
+
     prompt = PromptTemplate(
-        input_variables=["country_full", "product_name", "trends", "regional_context", "comp_source", "sourcing", "confidence_score", "scraped_price", "currency"], 
+        input_variables=["country_full", "product_name", "trends", "comp_source", "sourcing", "confidence_score", "price", "currency", "cogs", "ads", "logs", "tax_reason", "tax_amt", "tax_pct", "net_profit", "net_margin", "comp_count"], 
         template=template
     )
     
     final_prompt = prompt.format(
         country_full=country_config['country_full'], 
         product_name=product_name,
-        regional_context=regional_context,
         trends=str(market_data)[:600], 
         comp_source=competitor_data.get('source'),
         sourcing=str(sourcing_data)[:600], 
         confidence_score=confidence_score,
-        scraped_price=scraped_price, 
-        currency=currency
+        price=sell_price, 
+        currency=currency,
+        cogs=cogs_cost,
+        ads=ads_cost,
+        logs=logs_cost,
+        tax_reason=tax_info.get('reason'),
+        tax_amt=tax_amt,
+        tax_pct=int(raw_rate*100),
+        net_profit=net_profit,
+        net_margin=net_margin,
+        comp_count=comp_count
     )
     
     try:
         res = llm.invoke(final_prompt)
         result = clean_and_parse_json(res.content)
         if result:
+            # FORCE OVERWRITE: Ensure the Python-calculated math replaces any AI guesses
             fin = result.get('financials', {})
-            # Rounding for clean display
-            fin['sell_price'] = smart_round(fin.get('sell_price', 0))
-            fin['cogs'] = smart_round(fin.get('cogs', 0))
-            fin['marketing_cpa'] = smart_round(fin.get('marketing_cpa', 0))
-            fin['logistics_cost'] = smart_round(fin.get('logistics_cost', 0))
-            fin['tax_rate'] = smart_round(fin.get('tax_rate', 0))
-            fin['net_profit'] = smart_round(fin.get('net_profit', 0))
+            fin['sell_price'] = sell_price
+            fin['cogs'] = cogs_cost
+            fin['marketing_cpa'] = ads_cost
+            fin['logistics_cost'] = logs_cost
+            fin['tax_rate'] = tax_amt
+            fin['net_profit'] = net_profit
+            fin['net_margin_pct'] = net_margin
             result['financials'] = fin
             return result
         return get_empty_verdict("JSON Error")
